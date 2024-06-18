@@ -1,4 +1,3 @@
-// import the necessary Libaries
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { PrismaClient, Prisma } from "@prisma/client";
@@ -9,12 +8,21 @@ import { jwt } from "hono/jwt";
 import type { JwtVariables } from "hono/jwt";
 import { rateLimiter } from "hono-rate-limiter";
 
-type Variables = JwtVariables; // Defining the type of the variables to be used in the app
+type Variables = JwtVariables;
 
 const app = new Hono<{ Variables: Variables }>();
 const prisma = new PrismaClient();
 
 app.use("/*", cors());
+
+const limiter = rateLimiter({
+  windowMs: 1 * 60 * 1000,
+  limit: 2,
+  standardHeaders: "draft-6",
+  keyGenerator: (c) => c.req.header("X-Forwarded-For") || "default",
+});
+
+app.use(limiter);
 
 app.use(
   "/protected/*",
@@ -23,35 +31,17 @@ app.use(
   })
 );
 
-// Rate limiting
-// Enable CORS for all routes
-app.use("/*", cors());
-
-// Create a rate limiter middleware
-const limiter = rateLimiter({
-  windowMs: 1 * 60 * 1000, // rate limiter for 1 minute
-  limit: 2, // 2 requests per minute for each IP
-  standardHeaders: "draft-6", // draft-6: RateLimit-* headers; draft-7: combined RateLimit header
-  keyGenerator: (c) => c.req.header("X-Forwarded-For") || "default",
-});
-
-// Apply the rate limiting middleware to all requests
-app.use(limiter);
-
-// Initializing the end points
-// endpoint for the registion
 app.post("/register", async (c) => {
   const body = await c.req.json();
   const email = body.email;
   const password = body.password;
 
   const bcryptHash = await Bun.password.hash(password, {
-    algorithm: "bcrypt", // The algorithm to use for hashing
-    cost: 4, // The cost of the hash algorithm
+    algorithm: "bcrypt",
+    cost: 10,
   });
 
   try {
-    // creating the user in the database using the email and password that is passed in the body
     const user = await prisma.user.create({
       data: {
         email: email,
@@ -59,31 +49,25 @@ app.post("/register", async (c) => {
       },
     });
 
-    // returning the message that if the user is created successfully not and
-    //if it is created earlier then it will return the message that email already exists
     return c.json({ message: `${user.email} is created successfully` });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError) {
       if (e.code === "P2002") {
-        return c.json({ message: " This Email already exists" });
+        return c.json({ message: "This email already exists" });
       }
     }
-    // if the user is not created successfully then it will return the message that internal server error
     throw new HTTPException(500, {
-      message: "There Is A Internal Server Error",
+      message: "There is an internal server error",
     });
   }
 });
 
-// endpoint for the login page to authencate the user
 app.post("/login", async (c) => {
   try {
-    // passing the email and password to the body for login
     const body = await c.req.json();
     const email = body.email;
     const password = body.password;
 
-    // fetching the user information from the database using email
     const user = await prisma.user.findUnique({
       where: { email: email },
       select: { id: true, hashedPassword: true },
@@ -93,24 +77,15 @@ app.post("/login", async (c) => {
       return c.json({ message: "User not found" }, 404);
     }
 
-    const match = await Bun.password.verify(
-      password,
-      user.hashedPassword,
-      "bcrypt"
-    );
+    const match = await Bun.password.verify(password, user.hashedPassword, "bcrypt");
 
     if (match) {
       const payload = {
         sub: user.id,
-        exp: Math.floor(Date.now() / 1000) + 60 * 5, // Token expires in 5 minutes
+        exp: Math.floor(Date.now() / 1000) + 60 * 5,
       };
       const secret = "mySecretKey";
-      const token = await sign(payload, secret); // Await the sign function
-
-      if (typeof token !== "string") {
-        console.error("Token signing failed", token);
-        throw new HTTPException(500, { message: "Token signing failed" });
-      }
+      const token = await sign(payload, secret);
 
       return c.json({ message: "Login successful", token: token });
     } else {
@@ -118,27 +93,18 @@ app.post("/login", async (c) => {
     }
   } catch (error) {
     console.error("Login error:", error);
-    if (error instanceof HTTPException) {
-      throw error;
-    } else {
-      throw new HTTPException(500, {
-        message: "There Is A Internal Server Error",
-      });
-    }
+    throw new HTTPException(500, {
+      message: "There is an internal server error",
+    });
   }
 });
 
-// end point for the pokemon name
 app.get("/pokemon/:name", async (c) => {
   const { name } = c.req.param();
 
   try {
-    // fetching the pokemon informations  from the api using the name of the pokemon using axios library
-    const response = await axios.get(
-      `https://pokeapi.co/api/v2/pokemon/${name}`
-    );
+    const response = await axios.get(`https://pokeapi.co/api/v2/pokemon/${name}`);
     return c.json({ data: response.data });
-    // if the pokemon is not found then it will return the message that pokemon is not found..
   } catch (error: unknown) {
     if (axios.isAxiosError(error)) {
       if (error.response && error.response.status === 404) {
@@ -154,20 +120,16 @@ app.get("/pokemon/:name", async (c) => {
   }
 });
 
-// endpoint to catch pokemon and save it to the database
-app.post("/pokemon/catch", async (c) => {
+app.post("/protected/pokemon/catch", async (c) => {
   try {
-    // fetching the payload from the jwt token which we get while we login
     const payload = c.get("jwtPayload");
     if (!payload) {
-      throw new HTTPException(401, { message: "YOU ARE UNAUTHORIZED" });
+      throw new HTTPException(401, { message: "You are unauthorized" });
     }
 
-    // fetching the pokemon name from the body
     const body = await c.req.json();
     const pokemonName = body.name;
 
-    // if the pokemon name is not found then it will return the message that pokemon name is required
     if (!pokemonName) {
       throw new HTTPException(400, { message: "Pokemon name is required" });
     }
@@ -192,19 +154,14 @@ app.post("/pokemon/catch", async (c) => {
     return c.json({ message: "Pokemon caught", data: caughtPokemon });
   } catch (error) {
     console.error(error);
-    if (error instanceof HTTPException) {
-      throw error;
-    } else {
-      throw new HTTPException(500, { message: "Internal Server Error" });
-    }
+    throw new HTTPException(500, { message: "Internal server error" });
   }
 });
 
-// endpoint to release the pokemon from the database
-app.delete("/pokemon/delete/:id", async (c) => {
+app.delete("/protected/pokemon/delete/:id", async (c) => {
   const payload = c.get("jwtPayload");
   if (!payload) {
-    throw new HTTPException(401, { message: "YOU ARE UNAUTHORIZED" });
+    throw new HTTPException(401, { message: "You are unauthorized" });
   }
 
   const { id } = c.req.param();
@@ -227,11 +184,10 @@ app.delete("/pokemon/delete/:id", async (c) => {
   }
 });
 
-// endpoint to get the list of the caught pokemons
-app.get("/pokemon/caught", async (c) => {
+app.get("/protected/pokemon/caught", async (c) => {
   const payload = c.get("jwtPayload");
   if (!payload) {
-    throw new HTTPException(401, { message: "YOU ARE UNAUTHORIZED" });
+    throw new HTTPException(401, { message: "You are unauthorized" });
   }
 
   try {
@@ -241,7 +197,7 @@ app.get("/pokemon/caught", async (c) => {
     });
 
     if (!caughtPokemon.length) {
-      return c.json({ message: "Your Pokémon Not found." });
+      return c.json({ message: "Your Pokémon not found." });
     }
 
     return c.json({ data: caughtPokemon });
@@ -254,4 +210,9 @@ app.get("/pokemon/caught", async (c) => {
   }
 });
 
-export default app;
+Bun.serve({
+  fetch: app.fetch,
+  port: 3001,
+  hostname: "localhost",
+  development: true,
+});
