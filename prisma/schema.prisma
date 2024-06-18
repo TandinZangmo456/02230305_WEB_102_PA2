@@ -10,16 +10,27 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// user model to store user information
 model User {
-  id             String    @id @default(uuid())
-  email          String    @unique
+  id             String     @id @default(uuid())
+  email          String     @unique
   hashedPassword String
-  Account        Account[]
+  caughtPokemon  CaughtPokemon[]
 }
 
-model Account {
-  id      String @id @default(uuid())
-  userId  String
-  user    User   @relation(fields: [userId], references: [id])
-  balance Int    @default(0)
+// pokemon model to store pokemon information and the users who caught it
+model Pokemon {
+  id            String         @id @default(uuid())
+  name          String         @unique
+  caughtPokemons CaughtPokemon[]
+}
+
+// caught pokemon model to store the caught pokemon information and the user who caught it
+model CaughtPokemon {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  pokemonId String
+  pokemon   Pokemon  @relation(fields: [pokemonId], references: [id])
+  caughtAt  DateTime @default(now())
 }
