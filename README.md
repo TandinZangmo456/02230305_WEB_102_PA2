@@ -21,7 +21,7 @@ URL: /login
 
 Body:
 {
-  "email": "user@example.com",
+  "email": "tandin@example.com",
   "password": "yourpassword"
 }
 
@@ -67,7 +67,7 @@ URL: http://localhost:3001/register
 
 Body:
 {
-  "email": "user@example.com",
+  "email": "tandin@example.com",
   "password": "yourpassword"
 }
 
